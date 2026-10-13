@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gestión de Equipos - Cliente API REST</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+	
+<nav class="navbar navbar-dark bg-dark mb-4">
+	<div class="container">
+		<span class="navbar-brand">⚽ Gestión de Equipos</span>
+	 </div>
+</nav>
+
+<div class="container">
+    <ul class="nav nav-pills mb-3" id="tabs"></ul>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h3 id="titulo"></h3>
+        <button class="btn btn-success" onclick="abrir()">+ Nuevo</button>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead class="table-dark"><tr id="thead"></tr></thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="modalForm" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <form class="modal-content" id="form" onsubmit="guardar(event)">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitulo"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="errores"></div>
+                <div id="campos"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-success">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const API = '/api';
+
+// Descripción de cada entidad: t = tipo de campo (ref = uno, refs = varios)
+const ENT = {
+  clubes: { titulo: 'Clubes', campos: [
+    { n: 'nombre', l: 'Nombre', t: 'text' },
+    { n: 'ciudad', l: 'Ciudad', t: 'text' },
+    { n: 'entrenador', l: 'Entrenador', t: 'ref', ent: 'entrenadores' },
+    { n: 'asociacion', l: 'Asociación', t: 'ref', ent: 'asociaciones' },
+    { n: 'jugadores', l: 'Jugadores', t: 'refs', ent: 'jugadores' },
+    { n: 'competiciones', l: 'Competiciones', t: 'refs', ent: 'competiciones' } ] },
+  entrenadores: { titulo: 'Entrenadores', campos: [
+    { n: 'nombre', l: 'Nombre', t: 'text' }, { n: 'apellido', l: 'Apellido', t: 'text' },
+    { n: 'edad', l: 'Edad', t: 'number' }, { n: 'nacionalidad', l: 'Nacionalidad', t: 'text' } ] },
+  jugadores: { titulo: 'Jugadores', campos: [
+    { n: 'nombre', l: 'Nombre', t: 'text' }, { n: 'apellido', l: 'Apellido', t: 'text' },
+    { n: 'numero', l: 'Número', t: 'number' }, { n: 'posicion', l: 'Posición', t: 'text' } ] },
+  asociaciones: { titulo: 'Asociaciones', campos: [
+    { n: 'nombre', l: 'Nombre', t: 'text' }, { n: 'pais', l: 'País', t: 'text' },
+    { n: 'presidente', l: 'Presidente', t: 'text' } ] },
+  competiciones: { titulo: 'Competiciones', campos: [
+    { n: 'nombre', l: 'Nombre', t: 'text' }, { n: 'montoPremio', l: 'Monto premio', t: 'number' },
+    { n: 'fechaInicio', l: 'Fecha inicio', t: 'date' }, { n: 'fechaFin', l: 'Fecha fin', t: 'date' } ] }
+};
+
+let actual = 'clubes';
+let editId = null;
+const modal = new bootstrap.Modal(document.getElementById('modalForm'));
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+const etiqueta = r => r ? [r.nombre, r.apellido].filter(Boolean).join(' ') : '';
+
+function pestanas() {
+  document.getElementById('tabs').innerHTML = Object.entries(ENT).map(([k, v]) =>
+    `<li class="nav-item"><button class="nav-link ${k === actual ? 'active' : ''}" onclick="ir('${k}')">${v.titulo}</button></li>`
+  ).join('');
+}
+
+async function ir(k) { actual = k; pestanas(); await listar(); }
+
+function valor(r, c) {
+  const v = r[c.n];
+  if (c.t === 'ref') return v ? esc(etiqueta(v)) : '—';
+  if (c.t === 'refs') return (v || []).filter(Boolean).map(x => esc(etiqueta(x))).join(', ') || '—';
+  return esc(v);
+}
+
+async function listar() {
+  const cfg = ENT[actual];
+  const datos = await (await fetch(`${API}/${actual}`)).json();
+  document.getElementById('titulo').textContent = cfg.titulo;
+  document.getElementById('thead').innerHTML =
+    cfg.campos.map(c => `<th>${c.l}</th>`).join('') + '<th></th>';
+  document.getElementById('tbody').innerHTML = datos.map(r =>
+    `<tr>${cfg.campos.map(c => `<td>${valor(r, c)}</td>`).join('')}
+     <td class="text-end text-nowrap">
+       <button class="btn btn-sm btn-warning" onclick="abrir('${r.id}')">Editar</button>
+       <button class="btn btn-sm btn-danger" onclick="borrar('${r.id}')">Eliminar</button>
+     </td></tr>`).join('');
+}
+
+async function abrir(id = null) {
+  editId = id;
+  const cfg = ENT[actual];
+  const reg = id ? await (await fetch(`${API}/${actual}/${id}`)).json() : {};
+  let html = '';
+  for (const c of cfg.campos) {
+    const val = reg[c.n];
+    if (c.t === 'ref' || c.t === 'refs') {
+      const lista = await (await fetch(`${API}/${c.ent}`)).json();
+      const sel = c.t === 'ref' ? [val?.id] : (val || []).filter(Boolean).map(x => x.id);
+      html += `<div class="mb-3"><label class="form-label">${c.l}</label>
+        <select class="form-select" name="${c.n}" ${c.t === 'refs' ? 'multiple size="5"' : ''}>
+        ${c.t === 'ref' ? '<option value="">— Ninguno —</option>' : ''}
+        ${lista.map(o => `<option value="${o.id}" ${sel.includes(o.id) ? 'selected' : ''}>${esc(etiqueta(o))}</option>`).join('')}
+        </select></div>`;
+    } else {
+      html += `<div class="mb-3"><label class="form-label">${c.l}</label>
+        <input class="form-control" name="${c.n}" type="${c.t}" value="${esc(val)}" ${c.n === 'ciudad' ? '' : 'required'}></div>`;
+    }
+  }
+  document.getElementById('campos').innerHTML = html;
+  document.getElementById('errores').classList.add('d-none');
+  document.getElementById('modalTitulo').textContent = (id ? 'Editar ' : 'Nuevo ') + ENT[actual].titulo.toLowerCase();
+  modal.show();
+}
+
+async function guardar(ev) {
+  ev.preventDefault();
+  const f = document.getElementById('form');
+  const body = {};
+  for (const c of ENT[actual].campos) {
+    const el = f.elements[c.n];
+    if (c.t === 'ref') body[c.n] = el.value ? { id: el.value } : null;
+    else if (c.t === 'refs') body[c.n] = [...el.selectedOptions].map(o => ({ id: o.value }));
+    else if (c.t === 'number') body[c.n] = Number(el.value);
+    else body[c.n] = el.value;
+  }
+  const r = await fetch(editId ? `${API}/${actual}/${editId}` : `${API}/${actual}`, {
+    method: editId ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    const box = document.getElementById('errores');
+    box.innerHTML = Object.values(err).map(esc).join('<br>') || 'Error al guardar';
+    box.classList.remove('d-none');
+    return;
+  }
+  modal.hide();
+  listar();
+}
+
+async function borrar(id) {
+  if (!confirm('¿Eliminar este registro?')) return;
+  await fetch(`${API}/${actual}/${id}`, { method: 'DELETE' });
+  listar();
+}
+
+pestanas();
+listar();
+</script>
+</body>
+</html>
